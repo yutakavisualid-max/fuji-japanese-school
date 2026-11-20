@@ -1,0 +1,305 @@
+﻿<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kanban Seleksi Siswa - Fuji Japanese School (Simulasi)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', 'Noto Sans JP', sans-serif; background-color: #F5F5F2; }
+    .dragging { opacity: 0.45; transform: scale(0.98); }
+    .drag-over { background-color: #E7E5E4 !important; border: 2px dashed #1E293B !important; }
+    .card-list::-webkit-scrollbar { width: 4px; }
+    .card-list::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+  </style>
+</head>
+<body class="text-slate-800 min-h-screen flex flex-col">
+
+  <!-- BANNER SIMULASI -->
+  <div class="bg-slate-900 text-slate-200 px-4 py-2 text-[11px] flex flex-wrap items-center justify-between gap-2 border-b border-amber-500/40">
+    <div>
+      <span class="bg-amber-500/20 text-amber-300 border border-amber-400/40 px-2 py-0.5 rounded font-bold mr-1.5">DEMO / 試作版</span>
+      Data calon siswa di bawah ini adalah <strong>data dummy simulasi</strong>. Anda bebas menggeser kartu, menambah kolom, memindah urutan kolom (← / →), atau menghapus kolom—perubahan tersimpan otomatis.
+    </div>
+    <button onclick="resetDataSimulasi()" class="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 font-semibold transition">
+      🔄 Reset Simulasi Awal
+    </button>
+  </div>
+
+  <!-- HEADER DASHBOARD + PROGRESS KUOTA 30 SISWA -->
+  <header class="bg-white border-b border-stone-200 px-5 py-3.5 shadow-sm">
+    <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center gap-3">
+        <img src="logo.png" alt="Logo" class="w-9 h-9 rounded-full border border-amber-600/30">
+        <div>
+          <h1 class="text-sm font-extrabold text-slate-900">Pipeline Penerimaan Siswa • Batch Januari 2027</h1>
+          <p class="text-[11px] text-slate-500">富史ジャパニーズスクール (Fuji Japanese School) — Target Awal: 30 Siswa &amp; 3 Pengajar</p>
+        </div>
+      </div>
+
+      <!-- Indikator Progres Kuota -->
+      <div class="flex items-center gap-4 bg-stone-50 px-4 py-2 rounded-xl border border-stone-200">
+        <div>
+          <div class="flex items-center justify-between gap-4 text-[11px] font-bold">
+            <span class="text-slate-600">Siap Masuk Kelas (Jan 2027):</span>
+            <span id="quota-counter" class="text-red-700">0 / 30 Siswa</span>
+          </div>
+          <div class="w-44 h-2 bg-stone-200 rounded-full overflow-hidden mt-1">
+            <div id="quota-bar" class="h-full bg-red-700 transition-all duration-300" style="width: 0%"></div>
+          </div>
+        </div>
+        <div class="text-right border-l border-stone-200 pl-3">
+          <span class="block text-[10px] text-slate-400">Total Prospek</span>
+          <span id="total-leads-count" class="text-xs font-extrabold text-slate-800">0 Siswa</span>
+        </div>
+      </div>
+
+      <!-- Tombol Navigasi -->
+      <div class="flex items-center gap-2">
+        <button onclick="tambahKolomKustom()" class="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold rounded-lg transition">
+          ➕ Kolom Baru
+        </button>
+        <a href="index.html" class="px-3 py-1.5 bg-stone-100 hover:bg-stone-200 text-slate-700 border border-stone-300 text-xs font-bold rounded-lg transition">
+          ← Landing Page
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- PAPAN KANBAN (DIRENDER DINAMIS DARI LOCALSTORAGE) -->
+  <main class="flex-1 p-4 overflow-x-auto">
+    <div id="kanban-board" class="flex gap-3.5 items-start min-w-max max-w-7xl mx-auto"></div>
+  </main>
+
+  <script src="config.js?v=2.2"></script>
+  <script>
+    let draggedCard = null;
+
+    const DEFAULT_COLUMNS = [
+      { status: 'masuk',   title: '📥 Pendaftar Baru',      jp: '(新規)',     badgeStyle: 'bg-white text-slate-700 border border-stone-200', colStyle: 'bg-stone-200/70 border-stone-300/60', titleStyle: 'text-slate-800' },
+      { status: 'wa',      title: '📋 Verifikasi Berkas',   jp: '(書類確認)', badgeStyle: 'bg-amber-100 text-amber-800',                      colStyle: 'bg-stone-200/70 border-stone-300/60', titleStyle: 'text-slate-800' },
+      { status: 'seleksi', title: '🎙️ Tes & Wawancara',     jp: '(面接)',     badgeStyle: 'bg-blue-100 text-blue-800',                        colStyle: 'bg-stone-200/70 border-stone-300/60', titleStyle: 'text-slate-800' },
+      { status: 'closing', title: '🎓 Siap Kelas Jan 2027', jp: '(合格)',     badgeStyle: 'bg-emerald-600 text-white',                        colStyle: 'bg-emerald-50/80 border-emerald-200',  titleStyle: 'text-emerald-900' }
+    ];
+
+    function getColumns() {
+      const saved = localStorage.getItem('sasweb_columns');
+      if (saved) return JSON.parse(saved);
+      localStorage.setItem('sasweb_columns', JSON.stringify(DEFAULT_COLUMNS));
+      return DEFAULT_COLUMNS;
+    }
+
+    function saveColumns(cols) {
+      localStorage.setItem('sasweb_columns', JSON.stringify(cols));
+    }
+
+    function getLeads() {
+      const saved = localStorage.getItem('sasweb_leads');
+      if (saved) return JSON.parse(saved);
+      const initial = (typeof tenantConfig !== 'undefined' && tenantConfig.initialDummyLeads) ? tenantConfig.initialDummyLeads : [];
+      localStorage.setItem('sasweb_leads', JSON.stringify(initial));
+      return initial;
+    }
+
+    function saveLeads(leads) {
+      localStorage.setItem('sasweb_leads', JSON.stringify(leads));
+      updateCounters();
+    }
+
+    function renderBoardAndCards() {
+      const board = document.getElementById('kanban-board');
+      const cols = getColumns();
+      const leads = getLeads();
+      const validStatuses = new Set(cols.map(c => c.status));
+      const fallbackStatus = cols[0]?.status || 'masuk';
+
+      board.innerHTML = '';
+
+      cols.forEach((col, index) => {
+        const colEl = document.createElement('div');
+        colEl.dataset.status = col.status;
+        colEl.className = `kanban-column ${col.colStyle || 'bg-stone-200/70 border-stone-300/60'} p-3 rounded-2xl w-72 flex flex-col h-[76vh] border`;
+
+        const moveLeftBtn = index > 0
+          ? `<button onclick="geserKolom('${col.status}', -1)" title="Geser Kolom ke Kiri" class="text-slate-500 hover:text-slate-900 text-xs px-1 font-bold">←</button>`
+          : '';
+        const moveRightBtn = index < cols.length - 1
+          ? `<button onclick="geserKolom('${col.status}', 1)" title="Geser Kolom ke Kanan" class="text-slate-500 hover:text-slate-900 text-xs px-1 font-bold">→</button>`
+          : '';
+        const deleteColBtn = `<button onclick="hapusKolom('${col.status}')" title="Hapus Kolom" class="text-slate-400 hover:text-red-600 text-xs px-1">🗑️</button>`;
+
+        colEl.innerHTML = `
+          <div class="flex items-center justify-between mb-2.5 px-1 gap-1">
+            <h3 class="text-xs font-extrabold ${col.titleStyle || 'text-slate-800'} truncate">
+              ${col.title} <span class="text-[10px] font-normal opacity-70">${col.jp || ''}</span>
+            </h3>
+            <div class="flex items-center gap-0.5 shrink-0">
+              <span class="col-count ${col.badgeStyle || 'bg-white text-slate-700 border border-stone-200'} text-[10px] font-bold px-2 py-0.5 rounded-full mr-0.5">0</span>
+              ${moveLeftBtn}
+              ${moveRightBtn}
+              ${deleteColBtn}
+            </div>
+          </div>
+          <div class="card-list flex-1 space-y-2 overflow-y-auto pr-1"></div>
+        `;
+        board.appendChild(colEl);
+      });
+
+      leads.forEach(lead => {
+        const targetStatus = validStatuses.has(lead.status) ? lead.status : fallbackStatus;
+        const targetList = document.querySelector(`.kanban-column[data-status="${targetStatus}"] .card-list`);
+        if (!targetList) return;
+
+        const card = document.createElement('div');
+        card.draggable = true;
+        card.dataset.id = lead.id;
+        card.className = "kanban-card bg-white p-2.5 rounded-xl shadow-sm border border-stone-200 cursor-grab active:cursor-grabbing hover:border-slate-400 transition space-y-1.5";
+        card.innerHTML = `
+          <div class="flex items-start justify-between gap-1">
+            <div>
+              <span class="text-[9px] font-bold uppercase tracking-wider text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded">Dummy</span>
+              <h4 class="text-xs font-extrabold text-slate-900 mt-1">${lead.nama}</h4>
+            </div>
+            <button onclick="hapusLead(${lead.id})" title="Hapus Data Dummy" class="text-slate-300 hover:text-red-600 text-xs px-1">✕</button>
+          </div>
+          <div class="text-[10px] font-semibold text-slate-700 bg-stone-100 px-2 py-1 rounded-lg">
+            ${lead.program}
+          </div>
+          <div class="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
+            <span class="truncate max-w-[125px]">${lead.asalSekolah}</span>
+            <span class="font-semibold text-slate-700">${lead.whatsapp}</span>
+          </div>
+          ${lead.catatan ? `<p class="text-[10px] text-slate-400 italic border-t border-stone-100 pt-1">Catatan: ${lead.catatan}</p>` : ''}
+        `;
+        targetList.appendChild(card);
+      });
+
+      initDragAndDrop();
+      updateCounters();
+    }
+
+    function updateCounters() {
+      const leads = getLeads();
+      const targetQuota = (typeof tenantConfig !== 'undefined' && tenantConfig.targetQuota) ? tenantConfig.targetQuota : 30;
+      const cols = getColumns();
+      let closingCount = 0;
+
+      // Hitung siswa siap masuk kelas dari kolom 'closing' atau kolom paling kanan jika kolom 'closing' dihapus/diganti
+      const closingStatus = cols.some(c => c.status === 'closing') ? 'closing' : cols[cols.length - 1]?.status;
+
+      document.querySelectorAll('.kanban-column').forEach(col => {
+        const count = col.querySelectorAll('.kanban-card').length;
+        const badge = col.querySelector('.col-count');
+        if (badge) badge.innerText = count;
+        if (col.dataset.status === closingStatus) closingCount = count;
+      });
+
+      document.getElementById('total-leads-count').innerText = `${leads.length} Siswa`;
+      document.getElementById('quota-counter').innerText = `${closingCount} / ${targetQuota} Siswa`;
+      const pct = Math.min(100, Math.round((closingCount / targetQuota) * 100));
+      document.getElementById('quota-bar').style.width = `${pct}%`;
+    }
+
+    function initDragAndDrop() {
+      document.querySelectorAll('.kanban-card').forEach(card => {
+        card.addEventListener('dragstart', () => {
+          draggedCard = card;
+          card.classList.add('dragging');
+        });
+        card.addEventListener('dragend', () => {
+          draggedCard = null;
+          card.classList.remove('dragging');
+        });
+      });
+
+      document.querySelectorAll('.kanban-column').forEach(col => {
+        col.addEventListener('dragover', e => {
+          e.preventDefault();
+          col.classList.add('drag-over');
+        });
+        col.addEventListener('dragleave', () => col.classList.remove('drag-over'));
+        col.addEventListener('drop', e => {
+          e.preventDefault();
+          col.classList.remove('drag-over');
+          if (!draggedCard) return;
+
+          const cardList = col.querySelector('.card-list');
+          cardList.appendChild(draggedCard);
+
+          const leadId = Number(draggedCard.dataset.id);
+          const newStatus = col.dataset.status;
+          const updatedLeads = getLeads().map(item => item.id === leadId ? { ...item, status: newStatus } : item);
+          saveLeads(updatedLeads);
+        });
+      });
+    }
+
+    function tambahKolomKustom() {
+      const nama = prompt("Nama tahapan baru (contoh: Cek Kesehatan / MCU):");
+      if (!nama || !nama.trim()) return;
+
+      const cols = getColumns();
+      cols.push({
+        status: 'custom_' + Date.now(),
+        title: '📌 ' + nama.trim(),
+        jp: '(追加)',
+        badgeStyle: 'bg-white text-slate-700 border border-stone-200',
+        colStyle: 'bg-stone-200/70 border-stone-300/60',
+        titleStyle: 'text-slate-800'
+      });
+
+      saveColumns(cols);
+      renderBoardAndCards();
+    }
+
+    function geserKolom(statusKey, direction) {
+      const cols = getColumns();
+      const idx = cols.findIndex(c => c.status === statusKey);
+      const targetIdx = idx + direction;
+      if (idx < 0 || targetIdx < 0 || targetIdx >= cols.length) return;
+
+      const [moved] = cols.splice(idx, 1);
+      cols.splice(targetIdx, 0, moved);
+      saveColumns(cols);
+      renderBoardAndCards();
+    }
+
+    function hapusKolom(statusKey) {
+      const leadsInCol = getLeads().filter(l => l.status === statusKey);
+      if (leadsInCol.length > 0) {
+        alert(`Kolom ini masih memiliki ${leadsInCol.length} kartu siswa. Pindahkan kartunya ke kolom lain terlebih dahulu sebelum menghapus kolom.`);
+        return;
+      }
+
+      const cols = getColumns();
+      if (cols.length <= 1) {
+        alert("Minimal harus ada 1 kolom tersisa di papan Kanban.");
+        return;
+      }
+
+      if (!confirm("Hapus kolom ini?")) return;
+
+      const remainingCols = cols.filter(c => c.status !== statusKey);
+      saveColumns(remainingCols);
+      renderBoardAndCards();
+    }
+
+    function hapusLead(id) {
+      if (!confirm("Hapus kartu simulasi ini?")) return;
+      const updated = getLeads().filter(l => l.id !== id);
+      saveLeads(updated);
+      renderBoardAndCards();
+    }
+
+    function resetDataSimulasi() {
+      if (!confirm("Reset seluruh susunan kolom dan kembalikan ke 8 data simulasi awal?")) return;
+      localStorage.removeItem('sasweb_leads');
+      localStorage.removeItem('sasweb_columns');
+      renderBoardAndCards();
+    }
+
+    document.addEventListener('DOMContentLoaded', renderBoardAndCards);
+  </script>
+</body>
+</html>
